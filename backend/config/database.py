@@ -14,6 +14,13 @@ async def connect_to_mongo():
         client = AsyncIOMotorClient(MONGODB_URL)
         await client.admin.command('ping')
         print("Successfully connected to MongoDB")
+        
+        # Create indexes
+        db = get_database()
+        await db.users.create_index("email", unique=True)
+        await db.recipes.create_index([("user_id", 1), ("created_at", -1)])
+        print("Database indexes created")
+        
     except Exception as e:
         print(f"Error connecting to MongoDB: {e}")
         raise e
@@ -32,4 +39,8 @@ def get_database():
 # Collections
 def get_users_collection():
     """Get users collection."""
-    return get_database().users 
+    return get_database().users
+
+def get_recipes_collection():
+    """Get recipes collection."""
+    return get_database().recipes 

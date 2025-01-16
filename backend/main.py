@@ -4,13 +4,17 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from dotenv import load_dotenv
 import os
 
-from routers import auth
+from routers import auth, recipe
 from config.database import connect_to_mongo, close_mongo_connection
 
 # Load environment variables
 load_dotenv()
 
-app = FastAPI(title="Recipe Generator API")
+app = FastAPI(
+    title="Recipe Generator API",
+    description="AI-powered recipe generation API with image recognition capabilities",
+    version="1.0.0"
+)
 
 # CORS configuration
 origins = [
@@ -31,4 +35,5 @@ app.add_event_handler("startup", connect_to_mongo)
 app.add_event_handler("shutdown", close_mongo_connection)
 
 # Include routers
-app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"]) 
+app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
+app.include_router(recipe.router, prefix="/api/recipes", tags=["Recipes"]) 
