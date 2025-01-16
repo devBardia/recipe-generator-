@@ -9,7 +9,11 @@ interface AuthError {
   message: string;
 }
 
-export function LoginPage() {
+interface LoginPageProps {
+  onLogin: (userId: string) => void;
+}
+
+export function LoginPage({ onLogin }: LoginPageProps) {
   const [credentials, setCredentials] = useState<LoginCredentials>({
     email: '',
     password: '',
@@ -26,9 +30,11 @@ export function LoginPage() {
       // This is where we'll add the FastAPI connection later
       console.log('Login credentials:', credentials);
       
-      // Placeholder for API call
-      // const response = await loginUser(credentials);
-      // handle successful login here
+      // Placeholder for API call - for now just simulate a successful login
+      // Replace this with actual API call later
+      setTimeout(() => {
+        onLogin('temp-user-id');
+      }, 1000);
       
     } catch (err) {
       setError({ message: 'Failed to login. Please try again.' });
