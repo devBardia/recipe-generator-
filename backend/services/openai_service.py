@@ -79,36 +79,12 @@ def parse_recipe_response(response_text: str) -> Recipe:
 
     return Recipe(**recipe_dict)
 
-async def generate_recipe_from_text(
-    ingredients: List[str],
-    preferences: Optional[dict] = None
-) -> Recipe:
+async def generate_recipe(ingredients: List[str], preferences: Optional[dict] = None) -> Recipe:
     """Generate recipe using GPT-3.5."""
     prompt = create_recipe_prompt(ingredients, preferences)
     
     response = await openai.ChatCompletion.acreate(
         model="gpt-3.5-turbo",
-        messages=[
-            {"role": "system", "content": "You are a professional chef who creates detailed recipes."},
-            {"role": "user", "content": prompt}
-        ],
-        temperature=0.7,
-        max_tokens=1000
-    )
-    
-    recipe_text = response.choices[0].message.content
-    return parse_recipe_response(recipe_text)
-
-async def generate_recipe_from_image(
-    ingredients: List[str],
-    preferences: Optional[dict] = None
-) -> Recipe:
-    """Generate recipe using GPT-4 with image-identified ingredients."""
-    prompt = create_recipe_prompt(ingredients, preferences)
-    prompt += "\nThese ingredients were identified from an image, so please be creative and flexible with the recipe."
-    
-    response = await openai.ChatCompletion.acreate(
-        model="gpt-4",
         messages=[
             {"role": "system", "content": "You are a professional chef who creates detailed recipes."},
             {"role": "user", "content": prompt}

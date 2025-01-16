@@ -2,6 +2,7 @@ from fastapi import UploadFile
 import openai
 from typing import List
 import os
+import base64
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -13,13 +14,14 @@ async def process_ingredient_image(image: UploadFile) -> List[str]:
     Process an image to identify ingredients using GPT-4 Vision.
     Returns a list of identified ingredients.
     """
-    # Read the image file
-    image_content = await image.read()
-    
     try:
+        # Read and encode the image to base64
+        image_content = await image.read()
+        base64_image = base64.b64encode(image_content).decode('utf-8')
+        
         # Call GPT-4 Vision API to identify ingredients
         response = await openai.ChatCompletion.acreate(
-            model="gpt-4-vision-preview",
+            model="gpt-4o-mini",
             messages=[
                 {
                     "role": "system",
@@ -29,12 +31,15 @@ async def process_ingredient_image(image: UploadFile) -> List[str]:
                     "role": "user",
                     "content": [
                         {
-                            "type": "image",
-                            "image": image_content,
-                        },
-                        {
                             "type": "text",
                             "text": "List all the ingredients you can identify in this image. Return them as a comma-separated list."
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{base64_image}",
+                                "detail": "high"  # Use high detail for better ingredient detection
+                            }
                         }
                     ]
                 }

@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from datetime import datetime
 from config.database import get_users_collection, get_recipes_collection
 from .auth import get_current_user
-from services.openai_service import generate_recipe_from_text, generate_recipe_from_image
+from services.openai_service import generate_recipe
 from services.image_service import process_ingredient_image
 
 router = APIRouter()
@@ -37,7 +37,7 @@ async def generate_random_recipe(
     """Generate a random recipe based on optional preferences."""
     try:
         # Generate recipe using GPT-3.5
-        recipe = await generate_recipe_from_text([], preferences)
+        recipe = await generate_recipe([], preferences)
         
         # Save to database
         recipe_doc = {
@@ -63,11 +63,11 @@ async def generate_recipe_from_ingredients_image(
 ):
     """Generate a recipe from an image of ingredients."""
     try:
-        # Process image to identify ingredients
+        # Process image to identify ingredients using GPT-4 Vision
         ingredients = await process_ingredient_image(image)
         
-        # Generate recipe using GPT-4
-        recipe = await generate_recipe_from_image(ingredients, preferences)
+        # Generate recipe using GPT-3.5 with the identified ingredients
+        recipe = await generate_recipe(ingredients, preferences)
         
         # Save to database
         recipe_doc = {
@@ -93,7 +93,7 @@ async def generate_recipe_from_ingredients_text(
     """Generate a recipe from a list of ingredients."""
     try:
         # Generate recipe using GPT-3.5
-        recipe = await generate_recipe_from_text(
+        recipe = await generate_recipe(
             recipe_request.ingredients,
             recipe_request.preferences
         )
