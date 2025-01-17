@@ -1,10 +1,10 @@
 import { useState, FormEvent } from 'react';
+import { config } from '../config/config';
 
 interface LoginCredentials {
   email: string;
   password: string;
   confirmPassword?: string;
-  verificationCode?: string;
 }
 
 interface AuthError {
@@ -20,12 +20,10 @@ export function LoginPage({ onLogin, mode }: LoginPageProps) {
   const [credentials, setCredentials] = useState<LoginCredentials>({
     email: '',
     password: '',
-    confirmPassword: '',
-    verificationCode: ''
+    confirmPassword: ''
   });
   const [error, setError] = useState<AuthError | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [showVerification, setShowVerification] = useState(false);
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -46,22 +44,31 @@ export function LoginPage({ onLogin, mode }: LoginPageProps) {
     setIsLoading(true);
 
     try {
-      if (mode === 'signup' && !showVerification) {
-        // Simulate sending verification code
-        setTimeout(() => {
-          setShowVerification(true);
-          setIsLoading(false);
-        }, 1000);
-        return;
+      const endpoint = `${config.apiBaseUrl}/api/auth/${mode === 'login' ? 'login' : 'signup'}`;
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          email: credentials.email,
+          password: credentials.password
+        })
+      });
+
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.detail || `Failed to ${mode}`);
       }
 
-      // Simulate API call
-      setTimeout(() => {
-        onLogin('temp-user-id');
-      }, 1000);
+      const data = await response.json();
+      localStorage.setItem(config.jwtStorageKey, data.access_token);
+      onLogin(credentials.email);
       
     } catch (err) {
-      setError({ message: `Failed to ${mode}. Please try again.` });
+      setError({ 
+        message: err instanceof Error ? err.message : `Failed to ${mode}. Please try again.`
+      });
     } finally {
       setIsLoading(false);
     }
@@ -126,7 +133,7 @@ export function LoginPage({ onLogin, mode }: LoginPageProps) {
             />
           </div>
 
-          {mode === 'signup' && !showVerification && (
+          {mode === 'signup' && (
             <div>
               <label htmlFor="confirmPassword" className="block text-sm font-medium text-gray-700 mb-1">
                 Confirm Password
@@ -144,30 +151,6 @@ export function LoginPage({ onLogin, mode }: LoginPageProps) {
                   confirmPassword: e.target.value
                 })}
               />
-            </div>
-          )}
-
-          {showVerification && (
-            <div>
-              <label htmlFor="verificationCode" className="block text-sm font-medium text-gray-700 mb-1">
-                Verification Code
-              </label>
-              <input
-                id="verificationCode"
-                name="verificationCode"
-                type="text"
-                required
-                className="w-full h-12 px-4 rounded-xl bg-white/50 focus:bg-white transition-all duration-200"
-                placeholder="Enter the code sent to your email"
-                value={credentials.verificationCode}
-                onChange={(e) => setCredentials({
-                  ...credentials,
-                  verificationCode: e.target.value
-                })}
-              />
-              <p className="mt-2 text-sm text-gray-500">
-                We've sent a verification code to your email address.
-              </p>
             </div>
           )}
         </div>
@@ -188,10 +171,10 @@ export function LoginPage({ onLogin, mode }: LoginPageProps) {
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                 </svg>
-                {mode === 'login' ? 'Signing in...' : showVerification ? 'Verifying...' : 'Creating account...'}
+                {mode === 'login' ? 'Signing in...' : 'Creating account...'}
               </span>
             ) : (
-              mode === 'login' ? 'Sign in' : showVerification ? 'Verify Email' : 'Create Account'
+              mode === 'login' ? 'Sign in' : 'Create Account'
             )}
           </button>
         </div>

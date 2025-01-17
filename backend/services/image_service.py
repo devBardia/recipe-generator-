@@ -41,7 +41,7 @@ async def process_ingredient_image(image: UploadFile) -> List[str]:
         ]
 
         response = client.chat.completions.create(
-            model="gpt-4-vision-preview",
+            model="gpt-4o",
             messages=messages,
             max_tokens=300
         )

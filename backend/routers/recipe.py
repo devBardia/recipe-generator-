@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, status
 from typing import List, Optional
 from pydantic import BaseModel
 from datetime import datetime
+from bson import ObjectId
 from config.database import get_users_collection, get_recipes_collection
 from .auth import get_current_user
 from services.openai_service import generate_recipe
@@ -24,14 +25,19 @@ class RecipeCreate(BaseModel):
     preferences: Optional[dict] = {}
 
 class RecipeDB(RecipeBase):
-    id: str
     user_id: str
     created_at: datetime
     updated_at: datetime
 
+    class Config:
+        json_encoders = {
+            ObjectId: str,
+            datetime: lambda v: v.isoformat()
+        }
+
 @router.post("/random", response_model=RecipeBase)
 async def generate_random_recipe(
-    preferences: Optional[dict] = None,
+    preferences: dict = None,
     current_user = Depends(get_current_user)
 ):
     """Generate a random recipe based on optional preferences."""
@@ -39,16 +45,30 @@ async def generate_random_recipe(
         # Generate recipe using GPT-3.5
         recipe = await generate_recipe([], preferences)
         
-        # Save to database
-        recipe_doc = {
-            **recipe.dict(),
-            "user_id": current_user["_id"],
-            "created_at": datetime.utcnow(),
-            "updated_at": datetime.utcnow()
-        }
-        await get_recipes_collection().insert_one(recipe_doc)
-        
-        return recipe
+        if recipe:
+            # Save to database with user association
+            recipe_doc = {
+                **recipe.dict(),
+                "user_id": str(current_user["_id"]),  # Convert ObjectId to string
+                "created_at": datetime.utcnow(),
+                "updated_at": datetime.utcnow()
+            }
+            
+            result = await get_recipes_collection().insert_one(recipe_doc)
+            
+            if not result.inserted_id:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to save recipe"
+                )
+            
+            return recipe
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to generate recipe"
+            )
+            
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -66,19 +86,39 @@ async def generate_recipe_from_ingredients_image(
         # Process image to identify ingredients using GPT-4 Vision
         ingredients = await process_ingredient_image(image)
         
+        if not ingredients:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No ingredients detected in the image"
+            )
+        
         # Generate recipe using GPT-3.5 with the identified ingredients
         recipe = await generate_recipe(ingredients, preferences)
         
-        # Save to database
-        recipe_doc = {
-            **recipe.dict(),
-            "user_id": current_user["_id"],
-            "created_at": datetime.utcnow(),
-            "updated_at": datetime.utcnow()
-        }
-        await get_recipes_collection().insert_one(recipe_doc)
-        
-        return recipe
+        if recipe:
+            # Save to database with user association
+            recipe_doc = {
+                **recipe.dict(),
+                "user_id": str(current_user["_id"]),  # Convert ObjectId to string
+                "created_at": datetime.utcnow(),
+                "updated_at": datetime.utcnow()
+            }
+            
+            result = await get_recipes_collection().insert_one(recipe_doc)
+            
+            if not result.inserted_id:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to save recipe"
+                )
+            
+            return recipe
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to generate recipe"
+            )
+            
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -98,16 +138,30 @@ async def generate_recipe_from_ingredients_text(
             recipe_request.preferences
         )
         
-        # Save to database
-        recipe_doc = {
-            **recipe.dict(),
-            "user_id": current_user["_id"],
-            "created_at": datetime.utcnow(),
-            "updated_at": datetime.utcnow()
-        }
-        await get_recipes_collection().insert_one(recipe_doc)
-        
-        return recipe
+        if recipe:
+            # Save to database with user association
+            recipe_doc = {
+                **recipe.dict(),
+                "user_id": str(current_user["_id"]),  # Convert ObjectId to string
+                "created_at": datetime.utcnow(),
+                "updated_at": datetime.utcnow()
+            }
+            
+            result = await get_recipes_collection().insert_one(recipe_doc)
+            
+            if not result.inserted_id:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to save recipe"
+                )
+            
+            return recipe
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to generate recipe"
+            )
+            
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -123,7 +177,7 @@ async def get_user_recipes(
     """Get user's recipe history."""
     try:
         recipes = await get_recipes_collection().find(
-            {"user_id": current_user["_id"]}
+            {"user_id": str(current_user["_id"])}  # Convert ObjectId to string
         ).sort(
             "created_at", -1
         ).skip(skip).limit(limit).to_list(length=limit)

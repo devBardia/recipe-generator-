@@ -104,14 +104,29 @@ async def generate_recipe(ingredients: List[str], preferences: Optional[dict] = 
             model="gpt-3.5-turbo",
             messages=messages,
             tools=tools,
-            tool_choice="auto"
+            tool_choice={"type": "function", "function": {"name": "create_recipe"}}
         )
+
+        # Check if we have a response and tool calls
+        if not completion.choices or not completion.choices[0].message.tool_calls:
+            raise Exception("No recipe generated")
 
         # Get the function call from the response
         tool_call = completion.choices[0].message.tool_calls[0]
+        
+        if not tool_call or not tool_call.function or not tool_call.function.arguments:
+            raise Exception("Invalid recipe format")
+
+        # Parse the recipe data
         recipe_data = json.loads(tool_call.function.arguments)
         
-        # Parse the recipe data into our Recipe model
+        # Validate required fields
+        required_fields = ["title", "ingredients", "instructions", "cooking_time", "servings"]
+        for field in required_fields:
+            if field not in recipe_data:
+                raise Exception(f"Missing required field: {field}")
+
+        # Create and return the recipe
         recipe = Recipe(**recipe_data)
         return recipe
 
