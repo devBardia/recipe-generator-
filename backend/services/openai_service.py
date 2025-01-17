@@ -1,12 +1,13 @@
-import openai
+from openai import OpenAI
 from typing import List, Optional
+from pydantic import BaseModel
 import os
 from dotenv import load_dotenv
-from pydantic import BaseModel
+import json
 
 load_dotenv()
 
-openai.api_key = os.getenv("OPENAI_API_KEY")
+client = OpenAI()
 
 class Recipe(BaseModel):
     title: str
@@ -14,84 +15,106 @@ class Recipe(BaseModel):
     instructions: List[str]
     cooking_time: int
     servings: int
-    calories: Optional[int]
-    cuisine_type: Optional[str]
-    diet_type: Optional[str]
-
-def create_recipe_prompt(ingredients: List[str], preferences: Optional[dict] = None) -> str:
-    """Create a prompt for recipe generation."""
-    base_prompt = "Generate a detailed recipe with the following format:\n"
-    base_prompt += "Title: [Recipe Name]\n"
-    base_prompt += "Ingredients: [List of ingredients with quantities]\n"
-    base_prompt += "Instructions: [Step by step cooking instructions]\n"
-    base_prompt += "Cooking Time: [Time in minutes]\n"
-    base_prompt += "Servings: [Number of servings]\n"
-    base_prompt += "Calories: [Approximate calories per serving]\n"
-    base_prompt += "Cuisine Type: [Type of cuisine]\n"
-    base_prompt += "Diet Type: [Any specific diet category]\n\n"
-
-    if ingredients:
-        base_prompt += f"Use these ingredients: {', '.join(ingredients)}\n"
-    
-    if preferences:
-        for key, value in preferences.items():
-            base_prompt += f"{key}: {value}\n"
-    
-    return base_prompt
-
-def parse_recipe_response(response_text: str) -> Recipe:
-    """Parse OpenAI response into Recipe object."""
-    lines = response_text.strip().split('\n')
-    recipe_dict = {}
-    current_key = None
-    current_list = []
-
-    for line in lines:
-        if line.startswith('Title:'):
-            recipe_dict['title'] = line.replace('Title:', '').strip()
-        elif line.startswith('Ingredients:'):
-            current_key = 'ingredients'
-            current_list = []
-        elif line.startswith('Instructions:'):
-            recipe_dict['ingredients'] = current_list
-            current_key = 'instructions'
-            current_list = []
-        elif line.startswith('Cooking Time:'):
-            if current_key == 'instructions':
-                recipe_dict['instructions'] = current_list
-            time_str = line.replace('Cooking Time:', '').strip()
-            recipe_dict['cooking_time'] = int(time_str.split()[0])
-        elif line.startswith('Servings:'):
-            servings_str = line.replace('Servings:', '').strip()
-            recipe_dict['servings'] = int(servings_str.split()[0])
-        elif line.startswith('Calories:'):
-            calories_str = line.replace('Calories:', '').strip()
-            recipe_dict['calories'] = int(calories_str.split()[0])
-        elif line.startswith('Cuisine Type:'):
-            recipe_dict['cuisine_type'] = line.replace('Cuisine Type:', '').strip()
-        elif line.startswith('Diet Type:'):
-            recipe_dict['diet_type'] = line.replace('Diet Type:', '').strip()
-        elif line.strip() and current_key:
-            current_list.append(line.strip())
-
-    if current_key == 'instructions':
-        recipe_dict['instructions'] = current_list
-
-    return Recipe(**recipe_dict)
+    calories: Optional[int] = None
+    cuisine_type: Optional[str] = None
+    diet_type: Optional[str] = None
 
 async def generate_recipe(ingredients: List[str], preferences: Optional[dict] = None) -> Recipe:
-    """Generate recipe using GPT-3.5."""
-    prompt = create_recipe_prompt(ingredients, preferences)
-    
-    response = await openai.ChatCompletion.acreate(
-        model="gpt-3.5-turbo",
-        messages=[
+    try:
+        # Create the prompt
+        prompt = "Generate a recipe"
+        if ingredients:
+            prompt += f" using these ingredients: {', '.join(ingredients)}"
+        
+        if preferences:
+            prompt += "\nPreferences:"
+            if preferences.get('calories'):
+                prompt += f"\n- Around {preferences['calories']} calories per serving"
+            if preferences.get('diet_preference'):
+                prompt += f"\n- Diet preference: {preferences['diet_preference']}"
+            if preferences.get('cooking_time'):
+                prompt += f"\n- Cooking time: {preferences['cooking_time']}"
+            if preferences.get('cuisine_type') and preferences['cuisine_type'] != 'any':
+                prompt += f"\n- Cuisine type: {preferences['cuisine_type']}"
+            if preferences.get('skill_level'):
+                prompt += f"\n- Skill level: {preferences['skill_level']}"
+            if preferences.get('servings'):
+                prompt += f"\n- Servings: {preferences['servings']}"
+            if preferences.get('dietary_restrictions'):
+                prompt += f"\n- Dietary restrictions: {', '.join(preferences['dietary_restrictions'])}"
+            if preferences.get('meal_type'):
+                prompt += f"\n- Meal type: {preferences['meal_type']}"
+
+        tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "create_recipe",
+                    "description": "Create a recipe based on ingredients and preferences",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "title": {
+                                "type": "string",
+                                "description": "The title of the recipe"
+                            },
+                            "ingredients": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "List of ingredients with quantities"
+                            },
+                            "instructions": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "Step by step cooking instructions"
+                            },
+                            "cooking_time": {
+                                "type": "integer",
+                                "description": "Cooking time in minutes"
+                            },
+                            "servings": {
+                                "type": "integer",
+                                "description": "Number of servings"
+                            },
+                            "calories": {
+                                "type": "integer",
+                                "description": "Calories per serving"
+                            },
+                            "cuisine_type": {
+                                "type": "string",
+                                "description": "Type of cuisine"
+                            },
+                            "diet_type": {
+                                "type": "string",
+                                "description": "Type of diet"
+                            }
+                        },
+                        "required": ["title", "ingredients", "instructions", "cooking_time", "servings"]
+                    }
+                }
+            }
+        ]
+
+        messages = [
             {"role": "system", "content": "You are a professional chef who creates detailed recipes."},
             {"role": "user", "content": prompt}
-        ],
-        temperature=0.7,
-        max_tokens=1000
-    )
-    
-    recipe_text = response.choices[0].message.content
-    return parse_recipe_response(recipe_text) 
+        ]
+
+        completion = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=messages,
+            tools=tools,
+            tool_choice="auto"
+        )
+
+        # Get the function call from the response
+        tool_call = completion.choices[0].message.tool_calls[0]
+        recipe_data = json.loads(tool_call.function.arguments)
+        
+        # Parse the recipe data into our Recipe model
+        recipe = Recipe(**recipe_data)
+        return recipe
+
+    except Exception as e:
+        print(f"Error generating recipe: {str(e)}")
+        raise e 

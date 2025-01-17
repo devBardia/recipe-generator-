@@ -1,64 +1,57 @@
 from fastapi import UploadFile
-import openai
+from openai import OpenAI
+import base64
 from typing import List
 import os
-import base64
 from dotenv import load_dotenv
 
 load_dotenv()
 
-openai.api_key = os.getenv("OPENAI_API_KEY")
+client = OpenAI()
 
 async def process_ingredient_image(image: UploadFile) -> List[str]:
-    """
-    Process an image to identify ingredients using GPT-4 Vision.
-    Returns a list of identified ingredients.
-    """
     try:
-        # Read and encode the image to base64
-        image_content = await image.read()
-        base64_image = base64.b64encode(image_content).decode('utf-8')
+        # Read and encode the image
+        contents = await image.read()
+        base64_image = base64.b64encode(contents).decode('utf-8')
         
-        # Call GPT-4 Vision API to identify ingredients
-        response = await openai.ChatCompletion.acreate(
-            model="gpt-4o-mini",
-            messages=[
-                {
-                    "role": "system",
-                    "content": "You are an expert at identifying food ingredients from images. List all ingredients you can see."
-                },
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": "List all the ingredients you can identify in this image. Return them as a comma-separated list."
-                        },
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/jpeg;base64,{base64_image}",
-                                "detail": "high"  # Use high detail for better ingredient detection
-                            }
+        # Reset file pointer for potential future reads
+        await image.seek(0)
+
+        messages = [
+            {
+                "role": "system",
+                "content": "You are a professional chef who can identify ingredients in images. List only the main ingredients you can see, separated by commas."
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "What ingredients can you identify in this image? Please list them in a comma-separated format."
+                    },
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/jpeg;base64,{base64_image}"
                         }
-                    ]
-                }
-            ],
+                    }
+                ]
+            }
+        ]
+
+        response = client.chat.completions.create(
+            model="gpt-4-vision-preview",
+            messages=messages,
             max_tokens=300
         )
-        
-        # Parse the response
+
+        # Extract ingredients from the response
         ingredients_text = response.choices[0].message.content
-        ingredients = [
-            ingredient.strip()
-            for ingredient in ingredients_text.split(',')
-            if ingredient.strip()
-        ]
+        ingredients = [ingredient.strip() for ingredient in ingredients_text.split(',')]
         
         return ingredients
-        
+
     except Exception as e:
-        raise Exception(f"Error processing image: {str(e)}")
-    finally:
-        # Reset file pointer
-        await image.seek(0) 
+        print(f"Error processing image: {str(e)}")
+        raise e 
