@@ -1,57 +1,54 @@
-from fastapi import UploadFile
-from openai import OpenAI
-import base64
-from typing import List
 import os
+from typing import List
+from openai import OpenAI
 from dotenv import load_dotenv
 
 load_dotenv()
 
-client = OpenAI()
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-async def process_ingredient_image(image: UploadFile) -> List[str]:
+async def process_ingredient_image(base64_image: str) -> List[str]:
+    """Process an image to identify ingredients using GPT-4 Vision."""
     try:
-        # Read and encode the image
-        contents = await image.read()
-        base64_image = base64.b64encode(contents).decode('utf-8')
-        
-        # Reset file pointer for potential future reads
-        await image.seek(0)
-
-        messages = [
-            {
-                "role": "system",
-                "content": "You are a professional chef who can identify ingredients in images. List only the main ingredients you can see, separated by commas."
-            },
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": "What ingredients can you identify in this image? Please list them in a comma-separated format."
-                    },
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:image/jpeg;base64,{base64_image}"
+        response = await client.chat.completions.create(
+            model="gpt-4-vision-preview",
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a professional chef who specializes in identifying ingredients from images. Focus on main ingredients that would be used in cooking."
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "List the main ingredients you can see in this image. Please:\n1. Only list actual ingredients (no packaging, containers, or utensils)\n2. Include approximate quantities if visible\n3. List each ingredient in its basic form\n4. Separate ingredients with commas\n5. Don't include numbering or bullet points"
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{base64_image}"
+                            }
                         }
-                    }
-                ]
-            }
-        ]
-
-        response = client.chat.completions.create(
-            model="gpt-4o",
-            messages=messages,
-            max_tokens=300
+                    ]
+                }
+            ],
+            max_tokens=1000
         )
 
-        # Extract ingredients from the response
+        if not response.choices or not response.choices[0].message.content:
+            return []
+
+        # Parse the comma-separated list into individual ingredients
         ingredients_text = response.choices[0].message.content
-        ingredients = [ingredient.strip() for ingredient in ingredients_text.split(',')]
-        
+        ingredients = [
+            ingredient.strip()
+            for ingredient in ingredients_text.split(',')
+            if ingredient.strip() and not ingredient.strip().isdigit()
+        ]
+
         return ingredients
 
     except Exception as e:
         print(f"Error processing image: {str(e)}")
-        raise e 
+        return [] 

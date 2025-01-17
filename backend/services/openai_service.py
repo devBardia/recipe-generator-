@@ -1,135 +1,130 @@
-from openai import OpenAI
-from typing import List, Optional
-from pydantic import BaseModel
 import os
+from typing import Optional, Dict, List
+from openai import OpenAI
 from dotenv import load_dotenv
 import json
 
 load_dotenv()
 
-client = OpenAI()
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-class Recipe(BaseModel):
-    title: str
-    ingredients: List[str]
-    instructions: List[str]
-    cooking_time: int
-    servings: int
-    calories: Optional[int] = None
-    cuisine_type: Optional[str] = None
-    diet_type: Optional[str] = None
+def create_recipe_prompt(ingredients: List[str], preferences: Optional[Dict] = None) -> str:
+    base_prompt = """Create a detailed recipe using the available ingredients and following the specified preferences. Format the response as a JSON object with the following structure:
+{
+    "title": "Recipe Name",
+    "ingredients": ["2 cups flour", "1 teaspoon salt", etc.],
+    "instructions": ["Preheat the oven to 350°F", "Mix dry ingredients in a bowl", etc.],
+    "cooking_time": minutes_as_integer,
+    "servings": number_of_servings,
+    "calories": approximate_calories_per_serving,
+    "cuisine_type": "cuisine style",
+    "diet_type": "diet category",
+    "difficulty": "easy/medium/hard",
+    "prep_time": minutes_for_preparation,
+    "total_time": total_minutes_needed
+}
 
-async def generate_recipe(ingredients: List[str], preferences: Optional[dict] = None) -> Recipe:
+Important requirements:
+1. Do not include numbers in instructions
+2. Each instruction should be a clear, concise step
+3. Keep instructions action-oriented and direct
+4. Use precise measurements in ingredients
+5. Follow the exact preferences specified for servings, cooking time, etc."""
+
+    if ingredients:
+        base_prompt += f"\n\nAvailable ingredients: {', '.join(ingredients)}"
+    
+    if preferences:
+        pref_str = "\n\nRequired preferences:"
+        if preferences.get('servings'):
+            pref_str += f"\n- Must make exactly {preferences['servings']} servings"
+        if preferences.get('cookingTime'):
+            pref_str += f"\n- Total cooking time should be around {preferences['cookingTime']} minutes"
+        if preferences.get('calories'):
+            pref_str += f"\n- Target {preferences['calories']} calories per serving"
+        if preferences.get('cuisineType') and preferences['cuisineType'] != 'any':
+            pref_str += f"\n- Follow {preferences['cuisineType']} cuisine style"
+        if preferences.get('dietType') and preferences['dietType'] != 'any':
+            pref_str += f"\n- Must be suitable for {preferences['dietType']} diet"
+        if preferences.get('difficulty'):
+            pref_str += f"\n- Recipe difficulty should be {preferences['difficulty']}"
+        base_prompt += pref_str
+    
+    return base_prompt
+
+async def generate_recipe(ingredients: List[str], preferences: Optional[Dict] = None) -> Optional[Dict]:
+    """Generate a recipe using OpenAI's GPT-3.5."""
     try:
-        # Create the prompt
-        prompt = "Generate a recipe"
-        if ingredients:
-            prompt += f" using these ingredients: {', '.join(ingredients)}"
+        prompt = create_recipe_prompt(ingredients, preferences)
         
-        if preferences:
-            prompt += "\nPreferences:"
-            if preferences.get('calories'):
-                prompt += f"\n- Around {preferences['calories']} calories per serving"
-            if preferences.get('diet_preference'):
-                prompt += f"\n- Diet preference: {preferences['diet_preference']}"
-            if preferences.get('cooking_time'):
-                prompt += f"\n- Cooking time: {preferences['cooking_time']}"
-            if preferences.get('cuisine_type') and preferences['cuisine_type'] != 'any':
-                prompt += f"\n- Cuisine type: {preferences['cuisine_type']}"
-            if preferences.get('skill_level'):
-                prompt += f"\n- Skill level: {preferences['skill_level']}"
-            if preferences.get('servings'):
-                prompt += f"\n- Servings: {preferences['servings']}"
-            if preferences.get('dietary_restrictions'):
-                prompt += f"\n- Dietary restrictions: {', '.join(preferences['dietary_restrictions'])}"
-            if preferences.get('meal_type'):
-                prompt += f"\n- Meal type: {preferences['meal_type']}"
-
-        tools = [
-            {
-                "type": "function",
-                "function": {
-                    "name": "create_recipe",
-                    "description": "Create a recipe based on ingredients and preferences",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "title": {
-                                "type": "string",
-                                "description": "The title of the recipe"
-                            },
-                            "ingredients": {
-                                "type": "array",
-                                "items": {"type": "string"},
-                                "description": "List of ingredients with quantities"
-                            },
-                            "instructions": {
-                                "type": "array",
-                                "items": {"type": "string"},
-                                "description": "Step by step cooking instructions"
-                            },
-                            "cooking_time": {
-                                "type": "integer",
-                                "description": "Cooking time in minutes"
-                            },
-                            "servings": {
-                                "type": "integer",
-                                "description": "Number of servings"
-                            },
-                            "calories": {
-                                "type": "integer",
-                                "description": "Calories per serving"
-                            },
-                            "cuisine_type": {
-                                "type": "string",
-                                "description": "Type of cuisine"
-                            },
-                            "diet_type": {
-                                "type": "string",
-                                "description": "Type of diet"
-                            }
-                        },
-                        "required": ["title", "ingredients", "instructions", "cooking_time", "servings"]
-                    }
-                }
-            }
-        ]
-
-        messages = [
-            {"role": "system", "content": "You are a professional chef who creates detailed recipes."},
-            {"role": "user", "content": prompt}
-        ]
-
-        completion = client.chat.completions.create(
+        response = await client.chat.completions.create(
             model="gpt-3.5-turbo",
-            messages=messages,
-            tools=tools,
-            tool_choice={"type": "function", "function": {"name": "create_recipe"}}
+            response_format={ "type": "json_object" },
+            messages=[
+                {
+                    "role": "system",
+                    "content": """You are a professional chef creating detailed, accurate recipes. 
+                    Important formatting rules:
+                    - DO NOT include any numbers, bullets, or prefixes in instruction steps
+                    - Each instruction should start directly with an action verb
+                    - Example correct format: "Mix the flour and water" (not "1. Mix" or "First, mix")
+                    - Keep instructions clear and concise
+                    - Use precise measurements in ingredients
+                    - STRICTLY follow the specified number of servings and other preferences"""
+                },
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            temperature=0.7,
+            max_tokens=1000
         )
 
-        # Check if we have a response and tool calls
-        if not completion.choices or not completion.choices[0].message.tool_calls:
-            raise Exception("No recipe generated")
-
-        # Get the function call from the response
-        tool_call = completion.choices[0].message.tool_calls[0]
+        if response.choices and response.choices[0].message.content:
+            recipe_data = json.loads(response.choices[0].message.content)
+            
+            # Clean up instructions to remove any numbering or bullets
+            recipe_data["instructions"] = [
+                # Remove any numbers, bullets, or prefixes like "Step 1:", "First,"
+                step.lstrip("0123456789-.).• ").replace("Step ", "").replace("step ", "")
+                    .replace("First, ", "").replace("Then, ", "").replace("Finally, ", "")
+                    .replace("Next, ", "").capitalize()
+                for step in recipe_data["instructions"]
+                if step.strip()
+            ]
+            
+            # Clean up ingredients to ensure consistent formatting
+            recipe_data["ingredients"] = [
+                ingredient.strip().lower().capitalize()
+                for ingredient in recipe_data["ingredients"]
+                if ingredient.strip()
+            ]
+            
+            # Ensure all required fields are present and preferences are followed
+            required_fields = ["title", "ingredients", "instructions", "cooking_time", "servings"]
+            if not all(field in recipe_data for field in required_fields):
+                raise ValueError("Missing required fields in recipe data")
+            
+            # Enforce preferences if specified
+            if preferences:
+                if preferences.get('servings'):
+                    recipe_data["servings"] = int(preferences["servings"])
+                if preferences.get('cookingTime'):
+                    recipe_data["cooking_time"] = int(preferences["cookingTime"])
+                if preferences.get('calories'):
+                    recipe_data["calories"] = int(preferences["calories"])
+                if preferences.get('cuisineType') and preferences['cuisineType'] != 'any':
+                    recipe_data["cuisine_type"] = preferences["cuisineType"]
+                if preferences.get('dietType') and preferences['dietType'] != 'any':
+                    recipe_data["diet_type"] = preferences["dietType"]
+                if preferences.get('difficulty'):
+                    recipe_data["difficulty"] = preferences["difficulty"]
+            
+            return recipe_data
         
-        if not tool_call or not tool_call.function or not tool_call.function.arguments:
-            raise Exception("Invalid recipe format")
-
-        # Parse the recipe data
-        recipe_data = json.loads(tool_call.function.arguments)
-        
-        # Validate required fields
-        required_fields = ["title", "ingredients", "instructions", "cooking_time", "servings"]
-        for field in required_fields:
-            if field not in recipe_data:
-                raise Exception(f"Missing required field: {field}")
-
-        # Create and return the recipe
-        recipe = Recipe(**recipe_data)
-        return recipe
+        return None
 
     except Exception as e:
         print(f"Error generating recipe: {str(e)}")
-        raise e 
+        return None 

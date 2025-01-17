@@ -1,5 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { config } from '../config/config';
+import { useAuth } from '../auth/AuthContext';
+import { ClockIcon, UserGroupIcon, FireIcon, BeakerIcon, ClipboardDocumentListIcon, BookmarkIcon, ShareIcon } from '@heroicons/react/24/outline';
 
 // Add API response type
 interface RecipeResponse {
@@ -11,13 +13,16 @@ interface RecipeResponse {
   calories?: number;
   cuisine_type?: string;
   diet_type?: string;
+  id?: string;
+  created_at?: string;
 }
 
 interface RecipeGeneratorProps {
   userId?: string;
 }
 
-export const RecipeGenerator = ({ userId }: RecipeGeneratorProps) => {
+export const RecipeGenerator = () => {
+  const { token } = useAuth();
   const [calories, setCalories] = useState('');
   const [dietPreference, setDietPreference] = useState<'healthy' | 'no-preference'>('no-preference');
   const [cookingTime, setCookingTime] = useState<'quick' | 'medium' | 'any'>('any');
@@ -35,6 +40,9 @@ export const RecipeGenerator = ({ userId }: RecipeGeneratorProps) => {
   const [isLoading, setIsLoading] = useState(false);
   const [recipe, setRecipe] = useState<RecipeResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [pastRecipes, setPastRecipes] = useState<RecipeResponse[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
 
   const cuisineOptions = [
     'any',
@@ -75,73 +83,38 @@ export const RecipeGenerator = ({ userId }: RecipeGeneratorProps) => {
   };
 
   const handleGenerateRecipe = async () => {
-    try {
       setIsLoading(true);
       setError(null);
-      console.log('Starting recipe generation...');
+    try {
+      let endpoint = `${config.apiBaseUrl}/api/recipes/random`;
+      let formData: any = { preferences: {} };
 
-      let endpoint = '';
-      let formData: FormData | Record<string, any>;
+      // Add all preferences to the request
+      if (calories) formData.preferences.calories = parseInt(calories);
+      if (dietPreference !== 'no-preference') formData.preferences.dietType = dietPreference;
+      if (cookingTime !== 'any') formData.preferences.cookingTime = cookingTime === 'quick' ? 30 : cookingTime === 'medium' ? 60 : 120;
+      if (cuisineType !== 'any') formData.preferences.cuisineType = cuisineType;
+      if (skillLevel) formData.preferences.difficulty = skillLevel;
+      if (servings) formData.preferences.servings = parseInt(servings);
+      if (dietaryRestrictions.length > 0) formData.preferences.dietaryRestrictions = dietaryRestrictions;
+      if (mealType) formData.preferences.mealType = mealType;
 
-      if (generationType === 'random') {
-        endpoint = `${config.apiBaseUrl}/api/recipes/random`;
-        formData = {
-          preferences: {
-            calories: calories ? parseInt(calories) : undefined,
-            diet_preference: dietPreference,
-            cooking_time: cookingTime,
-            cuisine_type: cuisineType,
-            skill_level: skillLevel,
-            servings: parseInt(servings),
-            dietary_restrictions: dietaryRestrictions,
-            meal_type: mealType
-          }
-        };
-      } else if (inputMethod === 'image' && selectedImage) {
+      if (generationType === 'ingredients') {
+        if (inputMethod === 'image' && selectedImage) {
         endpoint = `${config.apiBaseUrl}/api/recipes/from-image`;
-        const imageFormData = new FormData();
-        formData = imageFormData;
-        imageFormData.append('image', selectedImage);
-        imageFormData.append('preferences', JSON.stringify({
-          calories: calories ? parseInt(calories) : undefined,
-          diet_preference: dietPreference,
-          cooking_time: cookingTime,
-          cuisine_type: cuisineType,
-          skill_level: skillLevel,
-          servings: parseInt(servings),
-          dietary_restrictions: dietaryRestrictions,
-          meal_type: mealType
-        }));
-      } else {
+          formData = new FormData();
+          formData.append('image', selectedImage);
+          formData.append('preferences', JSON.stringify(formData.preferences));
+        } else if (inputMethod === 'text' && ingredients.trim()) {
         endpoint = `${config.apiBaseUrl}/api/recipes/from-text`;
-        formData = {
-          ingredients: ingredients.split(',').map(i => i.trim()),
-          preferences: {
-            calories: calories ? parseInt(calories) : undefined,
-            diet_preference: dietPreference,
-            cooking_time: cookingTime,
-            cuisine_type: cuisineType,
-            skill_level: skillLevel,
-            servings: parseInt(servings),
-            dietary_restrictions: dietaryRestrictions,
-            meal_type: mealType
-          }
-        };
-      }
-
-      console.log('Making API call to:', endpoint);
-      console.log('With data:', formData);
-
-      // Get the JWT token from localStorage
-      const token = localStorage.getItem(config.jwtStorageKey);
-      if (!token) {
-        throw new Error('Please log in to generate recipes');
+          formData.ingredients = ingredients.split(',').map(i => i.trim());
+        }
       }
 
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: {
-          ...(inputMethod === 'image' ? {} : { 'Content-Type': 'application/json' }),
+          ...(!(formData instanceof FormData) && { 'Content-Type': 'application/json' }),
           'Authorization': `Bearer ${token}`
         },
         body: formData instanceof FormData ? formData : JSON.stringify(formData),
@@ -153,9 +126,7 @@ export const RecipeGenerator = ({ userId }: RecipeGeneratorProps) => {
       }
 
       const recipeData = await response.json();
-      console.log('Recipe generated successfully:', recipeData);
       setRecipe(recipeData);
-
     } catch (err) {
       console.error('Error generating recipe:', err);
       setError(err instanceof Error ? err.message : 'Failed to generate recipe');
@@ -163,6 +134,36 @@ export const RecipeGenerator = ({ userId }: RecipeGeneratorProps) => {
       setIsLoading(false);
     }
   };
+
+  const fetchPastRecipes = async () => {
+    setLoadingHistory(true);
+    setError(null);
+    try {
+      const response = await fetch(`${config.apiBaseUrl}/api/recipes/history`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch recipe history');
+      }
+
+      const data = await response.json();
+      setPastRecipes(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load recipe history');
+    } finally {
+      setLoadingHistory(false);
+    }
+  };
+
+  // Call fetchPastRecipes when showPastRecipes changes to true
+  useEffect(() => {
+    if (showPastRecipes) {
+      fetchPastRecipes();
+    }
+  }, [showPastRecipes]);
 
   return (
     <div className="max-w-6xl mx-auto p-4 min-h-screen bg-gradient-to-b from-purple-50 to-white">
@@ -422,20 +423,40 @@ export const RecipeGenerator = ({ userId }: RecipeGeneratorProps) => {
                 <div className="space-y-6">
                   <div>
                     <h3 className="text-xl font-semibold mb-3">Ingredients</h3>
-                    <ul className="list-disc pl-5 space-y-2">
-                      {recipe.ingredients.map((ingredient, index) => (
-                        <li key={index} className="text-gray-700">{ingredient}</li>
-                      ))}
-                    </ul>
+                    <div className="mb-6">
+                      <h3 className="text-xl font-semibold mb-3 flex items-center">
+                        <BeakerIcon className="h-5 w-5 mr-2" />
+                        Ingredients
+                      </h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-2">
+                        {recipe.ingredients.map((ingredient, index) => (
+                          <div key={index} className="flex items-start">
+                            <span className="inline-block w-2 h-2 rounded-full bg-emerald-500 mt-2 mr-2"></span>
+                            <span className="text-gray-700">{ingredient}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
                   </div>
 
-                  <div>
-                    <h3 className="text-xl font-semibold mb-3">Instructions</h3>
-                    <ol className="list-decimal pl-5 space-y-2">
+                  {/* Instructions Section */}
+                  <div className="mt-8">
+                    <h3 className="text-xl font-semibold mb-4 text-gray-800 flex items-center">
+                      <ClipboardDocumentListIcon className="h-5 w-5 mr-2" />
+                      Instructions
+                    </h3>
+                    <div className="space-y-4">
                       {recipe.instructions.map((instruction, index) => (
-                        <li key={index} className="text-gray-700">{instruction}</li>
+                        <div key={index} className="flex items-start group">
+                          <div className="flex-shrink-0 w-8 h-8 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center font-semibold mr-3">
+                            {index + 1}
+                          </div>
+                          <div className="flex-grow">
+                            <p className="text-gray-700 leading-relaxed">{instruction}</p>
+                          </div>
+                        </div>
                       ))}
-                    </ol>
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
@@ -468,7 +489,7 @@ export const RecipeGenerator = ({ userId }: RecipeGeneratorProps) => {
               onClick={() => setShowPastRecipes(!showPastRecipes)}
               className="w-full bg-white/50 hover:bg-white text-gray-700 py-5 px-8 rounded-xl font-medium border border-gray-200 hover:border-purple-300 transition-all duration-200 text-lg"
             >
-              Past Recipes
+              {showPastRecipes ? 'Hide Past Recipes' : 'Show Past Recipes'}
             </button>
           </div>
         </div>
@@ -483,6 +504,93 @@ export const RecipeGenerator = ({ userId }: RecipeGeneratorProps) => {
       {error && (
         <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl mb-4">
           {error}
+        </div>
+      )}
+
+      {/* Past Recipes Section */}
+      {showPastRecipes && (
+        <div className="mt-8 space-y-6">
+          {loadingHistory ? (
+            <div className="flex justify-center items-center py-8">
+              <svg className="animate-spin h-8 w-8 text-purple-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+            </div>
+          ) : pastRecipes.length > 0 ? (
+            pastRecipes.map((pastRecipe) => (
+              <div key={pastRecipe.id} className="bg-white/70 backdrop-blur-sm rounded-2xl shadow-lg p-6 border border-purple-100">
+                <div className="flex justify-between items-start mb-6">
+                  <h3 className="text-2xl font-bold text-gray-800">{pastRecipe.title}</h3>
+                  <span className="text-sm text-gray-500">
+                    {new Date(pastRecipe.created_at!).toLocaleDateString()}
+                  </span>
+                </div>
+
+                {/* Recipe Details Grid */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6 text-sm bg-purple-50/50 rounded-xl p-4">
+                  <div>
+                    <span className="font-medium text-purple-700">Cooking Time:</span>
+                    <p className="text-gray-600">{pastRecipe.cooking_time} mins</p>
+                  </div>
+                  <div>
+                    <span className="font-medium text-purple-700">Servings:</span>
+                    <p className="text-gray-600">{pastRecipe.servings}</p>
+                  </div>
+                  {pastRecipe.calories && (
+                    <div>
+                      <span className="font-medium text-purple-700">Calories:</span>
+                      <p className="text-gray-600">{pastRecipe.calories} per serving</p>
+                    </div>
+                  )}
+                  {pastRecipe.cuisine_type && (
+                    <div>
+                      <span className="font-medium text-purple-700">Cuisine:</span>
+                      <p className="text-gray-600">{pastRecipe.cuisine_type}</p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Ingredients */}
+                <div className="mb-6">
+                  <h4 className="text-lg font-semibold mb-3 flex items-center text-gray-800">
+                    <BeakerIcon className="h-5 w-5 mr-2" />
+                    Ingredients
+                  </h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-2">
+                    {pastRecipe.ingredients.map((ingredient, index) => (
+                      <div key={index} className="flex items-start">
+                        <span className="inline-block w-2 h-2 rounded-full bg-purple-500 mt-2 mr-2"></span>
+                        <span className="text-gray-600">{ingredient}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Instructions */}
+                <div>
+                  <h4 className="text-lg font-semibold mb-3 flex items-center text-gray-800">
+                    <ClipboardDocumentListIcon className="h-5 w-5 mr-2" />
+                    Instructions
+                  </h4>
+                  <div className="space-y-3">
+                    {pastRecipe.instructions.map((instruction, index) => (
+                      <div key={index} className="flex items-start">
+                        <div className="flex-shrink-0 w-7 h-7 rounded-full bg-purple-100 text-purple-600 flex items-center justify-center font-semibold mr-3 text-sm">
+                          {index + 1}
+                        </div>
+                        <p className="text-gray-600 leading-relaxed flex-grow">{instruction}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            ))
+          ) : (
+            <div className="text-center py-8 bg-white/70 backdrop-blur-sm rounded-2xl shadow-lg border border-purple-100">
+              <div className="text-gray-500">No recipes found in your history</div>
+            </div>
+          )}
         </div>
       )}
     </div>

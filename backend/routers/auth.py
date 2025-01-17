@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException, Depends, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pydantic import BaseModel, EmailStr
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Optional, List
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from config.database import get_users_collection
@@ -27,6 +27,12 @@ class UserBase(BaseModel):
 
 class UserCreate(UserBase):
     password: str
+
+class UserInDB(UserBase):
+    id: str
+    recipes: List[str] = []
+    created_at: datetime
+    is_active: bool
 
 class Token(BaseModel):
     access_token: str
@@ -89,10 +95,11 @@ async def signup(user: UserCreate):
         "email": user.email,
         "hashed_password": get_password_hash(user.password),
         "created_at": datetime.utcnow(),
+        "recipes": [],  # Initialize empty recipes list
         "is_active": True
     }
     
-    await users_collection.insert_one(user_data)
+    result = await users_collection.insert_one(user_data)
     
     # Create access token
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
@@ -120,6 +127,12 @@ async def login(user: UserCreate):
     )
     return {"access_token": access_token, "token_type": "bearer"}
 
-@router.get("/me")
+@router.get("/me", response_model=UserInDB)
 async def read_users_me(current_user = Depends(get_current_user)):
-    return {"email": current_user["email"]} 
+    return {
+        "id": str(current_user["_id"]),
+        "email": current_user["email"],
+        "recipes": current_user.get("recipes", []),
+        "created_at": current_user["created_at"],
+        "is_active": current_user["is_active"]
+    } 
