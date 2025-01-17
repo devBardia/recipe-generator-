@@ -1,4 +1,17 @@
 import { useState } from 'react';
+import { config } from '../config/config';
+
+// Add API response type
+interface RecipeResponse {
+  title: string;
+  ingredients: string[];
+  instructions: string[];
+  cooking_time: number;
+  servings: number;
+  calories?: number;
+  cuisine_type?: string;
+  diet_type?: string;
+}
 
 interface RecipeGeneratorProps {
   userId?: string;
@@ -19,6 +32,9 @@ export const RecipeGenerator = ({ userId }: RecipeGeneratorProps) => {
   const [ingredients, setIngredients] = useState('');
   const [selectedImage, setSelectedImage] = useState<File | null>(null);
   const [showPastRecipes, setShowPastRecipes] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [recipe, setRecipe] = useState<RecipeResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const cuisineOptions = [
     'any',
@@ -59,19 +75,93 @@ export const RecipeGenerator = ({ userId }: RecipeGeneratorProps) => {
   };
 
   const handleGenerateRecipe = async () => {
-    // TODO: Implement API call to backend
-    console.log('Generating recipe with preferences:', {
-      calories,
-      dietPreference,
-      cookingTime,
-      cuisineType,
-      skillLevel,
-      servings,
-      dietaryRestrictions,
-      mealType,
-      generationType,
-      ingredients: ingredients || selectedImage
-    });
+    try {
+      setIsLoading(true);
+      setError(null);
+      console.log('Starting recipe generation...');
+
+      let endpoint = '';
+      let formData: FormData | Record<string, any>;
+
+      if (generationType === 'random') {
+        endpoint = `${config.apiBaseUrl}/api/recipes/random`;
+        formData = {
+          preferences: {
+            calories: calories ? parseInt(calories) : undefined,
+            diet_preference: dietPreference,
+            cooking_time: cookingTime,
+            cuisine_type: cuisineType,
+            skill_level: skillLevel,
+            servings: parseInt(servings),
+            dietary_restrictions: dietaryRestrictions,
+            meal_type: mealType
+          }
+        };
+      } else if (inputMethod === 'image' && selectedImage) {
+        endpoint = `${config.apiBaseUrl}/api/recipes/from-image`;
+        const imageFormData = new FormData();
+        formData = imageFormData;
+        imageFormData.append('image', selectedImage);
+        imageFormData.append('preferences', JSON.stringify({
+          calories: calories ? parseInt(calories) : undefined,
+          diet_preference: dietPreference,
+          cooking_time: cookingTime,
+          cuisine_type: cuisineType,
+          skill_level: skillLevel,
+          servings: parseInt(servings),
+          dietary_restrictions: dietaryRestrictions,
+          meal_type: mealType
+        }));
+      } else {
+        endpoint = `${config.apiBaseUrl}/api/recipes/from-text`;
+        formData = {
+          ingredients: ingredients.split(',').map(i => i.trim()),
+          preferences: {
+            calories: calories ? parseInt(calories) : undefined,
+            diet_preference: dietPreference,
+            cooking_time: cookingTime,
+            cuisine_type: cuisineType,
+            skill_level: skillLevel,
+            servings: parseInt(servings),
+            dietary_restrictions: dietaryRestrictions,
+            meal_type: mealType
+          }
+        };
+      }
+
+      console.log('Making API call to:', endpoint);
+      console.log('With data:', formData);
+
+      // Get the JWT token from localStorage
+      const token = localStorage.getItem(config.jwtStorageKey);
+      if (!token) {
+        throw new Error('Please log in to generate recipes');
+      }
+
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          ...(inputMethod === 'image' ? {} : { 'Content-Type': 'application/json' }),
+          'Authorization': `Bearer ${token}`
+        },
+        body: formData instanceof FormData ? formData : JSON.stringify(formData),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Failed to generate recipe');
+      }
+
+      const recipeData = await response.json();
+      console.log('Recipe generated successfully:', recipeData);
+      setRecipe(recipeData);
+
+    } catch (err) {
+      console.error('Error generating recipe:', err);
+      setError(err instanceof Error ? err.message : 'Failed to generate recipe');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -304,10 +394,75 @@ export const RecipeGenerator = ({ userId }: RecipeGeneratorProps) => {
           <div className="space-y-4">
             <button
               onClick={handleGenerateRecipe}
-              className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 text-white py-5 px-8 rounded-xl font-medium hover:from-purple-700 hover:to-indigo-700 transform hover:scale-[1.02] transition-all duration-200 shadow-lg text-lg"
+              disabled={isLoading}
+              className={`w-full bg-gradient-to-r from-purple-600 to-indigo-600 text-white py-5 px-8 rounded-xl font-medium transition-all duration-200 ${
+                isLoading 
+                  ? 'opacity-70 cursor-not-allowed'
+                  : 'hover:from-purple-700 hover:to-indigo-700 transform hover:scale-[1.02] shadow-lg'
+              } text-lg`}
             >
-              Generate Recipe
+              {isLoading ? (
+                <span className="flex items-center justify-center">
+                  <svg className="animate-spin h-5 w-5 mr-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  Generating Recipe...
+                </span>
+              ) : (
+                'Generate Recipe'
+              )}
             </button>
+
+            {/* Display generated recipe */}
+            {recipe && (
+              <div className="bg-white/70 backdrop-blur-sm rounded-2xl shadow-xl p-8 border border-purple-100 mt-8">
+                <h2 className="text-3xl font-bold text-gray-800 mb-6">{recipe.title}</h2>
+                
+                <div className="space-y-6">
+                  <div>
+                    <h3 className="text-xl font-semibold mb-3">Ingredients</h3>
+                    <ul className="list-disc pl-5 space-y-2">
+                      {recipe.ingredients.map((ingredient, index) => (
+                        <li key={index} className="text-gray-700">{ingredient}</li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  <div>
+                    <h3 className="text-xl font-semibold mb-3">Instructions</h3>
+                    <ol className="list-decimal pl-5 space-y-2">
+                      {recipe.instructions.map((instruction, index) => (
+                        <li key={index} className="text-gray-700">{instruction}</li>
+                      ))}
+                    </ol>
+                  </div>
+
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                    <div>
+                      <span className="font-medium">Cooking Time:</span>
+                      <p>{recipe.cooking_time} minutes</p>
+                    </div>
+                    <div>
+                      <span className="font-medium">Servings:</span>
+                      <p>{recipe.servings}</p>
+                    </div>
+                    {recipe.calories && (
+                      <div>
+                        <span className="font-medium">Calories:</span>
+                        <p>{recipe.calories} per serving</p>
+                      </div>
+                    )}
+                    {recipe.cuisine_type && (
+                      <div>
+                        <span className="font-medium">Cuisine:</span>
+                        <p>{recipe.cuisine_type}</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
 
             <button
               onClick={() => setShowPastRecipes(!showPastRecipes)}
@@ -323,6 +478,13 @@ export const RecipeGenerator = ({ userId }: RecipeGeneratorProps) => {
       <div className="w-full h-24 bg-gradient-to-r from-purple-100 to-indigo-100 mt-8 rounded-2xl flex items-center justify-center shadow-sm backdrop-blur-sm">
         <span className="text-gray-500 font-medium">Advertisement Space</span>
       </div>
+
+      {/* Add error message display */}
+      {error && (
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl mb-4">
+          {error}
+        </div>
+      )}
     </div>
   );
 }; 
